@@ -298,7 +298,7 @@ class WebRequest(object):
         # generates a weird message as stacks just get concatenated, exceptions
         # not guaranteed to copy.copy cleanly & we want `exception` as leaf (for
         # callers to check & look at)
-        raise exception.with_traceback(None) from new_cause
+        raise exception #.with_traceback(None) from new_cause
 
     def redirect(self, location, code=303, local=True):
         # compatibility, Werkzeug support URL as location
