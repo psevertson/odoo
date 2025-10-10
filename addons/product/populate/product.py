@@ -5,7 +5,8 @@ import collections
 
 from odoo import models
 from odoo.tools import populate
-from odoo.addons.stock.populate.stock import COMPANY_NB_WITH_STOCK
+
+COMPANY_NB_WITH_STOCK = 3
 
 _logger = logging.getLogger(__name__)
 
