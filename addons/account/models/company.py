@@ -7,13 +7,75 @@ import calendar
 from odoo import fields, models, api, _, Command
 from odoo.exceptions import ValidationError, UserError, RedirectWarning
 from odoo.osv import expression
-from odoo.tools import date_utils, format_list, SQL
+from odoo.tools import date_utils, format_list, SQL, LazyTranslate
 from odoo.tools.mail import is_html_empty
 from odoo.tools.misc import format_date
 from odoo.addons.account.models.account_move import MAX_HASH_VERSION
 from odoo.addons.account.models.partner import _ref_company_registry
-from odoo.addons.base_vat.models.res_partner import _ref_vat
 
+_lt = LazyTranslate(__name__)
+
+_ref_vat = {
+    'al': 'ALJ91402501L',
+    'ar': _lt('AR200-5536168-2 or 20055361682'),
+    'at': 'ATU12345675',
+    'au': '83 914 571 673',
+    'be': 'BE0477472701',
+    'bg': 'BG1234567892',
+    'br': _lt('either 11 digits for CPF or 14 digits for CNPJ'),
+    'cr': _lt('3101012009'),
+    'ch': _lt('CHE-123.456.788 TVA or CHE-123.456.788 MWST or CHE-123.456.788 IVA'),  # Swiss by Yannick Vaucher @ Camptocamp
+    'cl': 'CL76086428-5',
+    'co': _lt('CO213123432-1 or CO213.123.432-1'),
+    'cy': 'CY10259033P',
+    'cz': 'CZ12345679',
+    'de': _lt('DE123456788 or 12/345/67890'),
+    'dk': 'DK12345674',
+    'do': _lt('DO1-01-85004-3 or 101850043'),
+    'ec': _lt('1792060346001 or 1792060346'),
+    'ee': 'EE123456780',
+    'es': 'ESA12345674',
+    'fi': 'FI12345671',
+    'fr': 'FR23334175221',
+    'gb': _lt('GB123456782 or XI123456782'),
+    'gr': 'EL123456783',
+    'hu': _lt('HU12345676 or 12345678-1-11 or 8071592153'),
+    'hr': 'HR01234567896',  # Croatia, contributed by Milan Tribuson
+    'id': '1234567890123456',
+    'ie': 'IE1234567FA',
+    'il': _lt('XXXXXXXXX [9 digits] and it should respect the Luhn algorithm checksum'),
+    'in': "12AAAAA1234AAZA",
+    'is': 'IS062199',
+    'it': 'IT12345670017',
+    'kr': '123-45-67890 or 1234567890',
+    'lt': 'LT123456715',
+    'lu': 'LU12345613',
+    'lv': 'LV41234567891',
+    'ma': '12345678',
+    'mc': 'FR53000004605',
+    'mt': 'MT12345634',
+    'mx': _lt('MXGODE561231GR8 or GODE561231GR8'),
+    'nl': 'NL123456782B90',
+    'no': 'NO123456785',
+    'nz': _lt('49-098-576 or 49098576'),
+    'pe': _lt('10XXXXXXXXY or 20XXXXXXXXY or 15XXXXXXXXY or 16XXXXXXXXY or 17XXXXXXXXY'),
+    'ph': '123-456-789-123',
+    'pl': 'PL1234567883',
+    'pt': 'PT123456789',
+    'ro': 'RO1234567897 or 8001011234567 or 9000123456789',
+    'rs': 'RS101134702',
+    'ru': 'RU123456789047',
+    'se': 'SE123456789701',
+    'si': 'SI12345679',
+    'sk': 'SK2022749619',
+    'sm': 'SM24165',
+    'tr': _lt('17291716060 (NIN) or 1729171602 (VKN)'),
+    'uy': _lt("Example: '219999830019' (format: 12 digits, all numbers, valid check digit)"),
+    've': 'V-12345678-1, V123456781, V-12.345.678-1',
+    'xi': 'XI123456782',
+    'sa': _lt('310175397400003 [Fifteen digits, first and last digits should be "3"]'),
+    'jp': 'T7000012050002',
+}
 
 MONTH_SELECTION = [
     ('1', 'January'),
