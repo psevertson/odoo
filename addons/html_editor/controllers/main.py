@@ -15,7 +15,6 @@ from odoo.exceptions import UserError, MissingError, AccessError
 from odoo.http import request
 from odoo.tools.mimetypes import guess_mimetype
 from odoo.tools.misc import file_open
-from odoo.addons.iap.tools import iap_tools
 from odoo.addons.mail.tools import link_preview
 from lxml import html
 
@@ -538,28 +537,6 @@ class HTML_Editor(http.Controller):
             ('Content-type', 'image/svg+xml'),
             ('Cache-control', 'max-age=%s' % http.STATIC_CACHE_LONG),
         ])
-
-    @http.route(["/web_editor/generate_text", "/html_editor/generate_text"], type="json", auth="user")
-    def generate_text(self, prompt, conversation_history):
-        try:
-            IrConfigParameter = request.env['ir.config_parameter'].sudo()
-            olg_api_endpoint = IrConfigParameter.get_param('web_editor.olg_api_endpoint', DEFAULT_OLG_ENDPOINT)
-            database_id = IrConfigParameter.get_param('database.uuid')
-            response = iap_tools.iap_jsonrpc(olg_api_endpoint + "/api/olg/1/chat", params={
-                'prompt': prompt,
-                'conversation_history': conversation_history or [],
-                'database_id': database_id,
-            }, timeout=30)
-            if response['status'] == 'success':
-                return response['content']
-            elif response['status'] == 'error_prompt_too_long':
-                raise UserError(_("Sorry, your prompt is too long. Try to say it in fewer words."))
-            elif response['status'] == 'limit_call_reached':
-                raise UserError(_("You have reached the maximum number of requests for this service. Try again later."))
-            else:
-                raise UserError(_("Sorry, we could not generate a response. Please try again later."))
-        except AccessError:
-            raise AccessError(_("Oops, it looks like our AI is unreachable!"))
 
     @http.route(["/web_editor/get_ice_servers", "/html_editor/get_ice_servers"], type='json', auth="user")
     def get_ice_servers(self):
