@@ -64,6 +64,7 @@ from .tools import (
 )
 from .tools.lru import LRU
 from .tools.misc import LastOrderedSet, ReversedIterable, unquote
+from .tools.safe_eval import safe_eval
 from .tools.translate import _, LazyTranslate
 
 import typing
@@ -92,8 +93,9 @@ regex_order = re.compile(r'''
 ''', re.IGNORECASE | re.VERBOSE)
 regex_object_name = re.compile(r'^[a-z0-9_.]+$')
 regex_pg_name = re.compile(r'^[a-z_][a-z0-9_$]*$', re.I)
-regex_field_agg = re.compile(r'(\w+)(?::(\w+)(?:\((\w+)\))?)?')  # For read_group
-regex_read_group_spec = re.compile(r'(\w+)(\.(\w+))?(?::(\w+))?$')  # For _read_group
+regex_field_agg = re.compile(r'(\w+)(?::(\w+)(?:\((\w+)\))?)?(\[.*\])?')  # For read_group
+
+regex_read_group_spec = re.compile(r'(\w+)(\.(\w+))?(?::(\w+))?(\[.*\])?$')  # For _read_group
 
 AUTOINIT_RECALCULATE_STORED_FIELDS = 1000
 GC_UNLINK_LIMIT = 100_000
@@ -113,7 +115,7 @@ def parse_read_group_spec(spec: str) -> tuple:
         )
 
     groups = res_match.groups()
-    return groups[0], groups[2], groups[3]
+    return groups[0], groups[2], groups[3], groups[4]
 
 def check_object_name(name):
     """ Check if the given name is a valid model name.
@@ -2052,8 +2054,7 @@ class BaseModel(metaclass=MetaModel):
         if aggregate_spec == '__count':
             return SQL("COUNT(*)")
 
-        fname, property_name, func = parse_read_group_spec(aggregate_spec)
-
+        fname, property_name, func, agg_domain = parse_read_group_spec(aggregate_spec)
         if property_name:
             raise ValueError(f"Invalid {aggregate_spec!r}, this dot notation is not supported")
 
@@ -2069,14 +2070,29 @@ class BaseModel(metaclass=MetaModel):
             raise ValueError(f"Aggregate method {func!r} can be only used on relational field (or id) (for {aggregate_spec!r}).")
 
         sql_field = self._field_to_sql(self._table, fname, query)
-        return READ_GROUP_AGGREGATE[func](self._table, sql_field)
+
+        # PATCH to allow filtered aggregates
+        agg_select = READ_GROUP_AGGREGATE[func](self._table, sql_field)
+        if agg_domain:
+            agg_domain = safe_eval(
+                agg_domain, locals_dict={"false": False, "true": True}
+            )
+            where_query = self._where_calc(agg_domain)
+            self._apply_ir_rules(where_query)
+
+            where_clause = where_query.where_clause
+            if where_clause:
+                query._joins.update(where_query._joins)
+                agg_select = SQL('%s FILTER (WHERE %s)', agg_select, where_clause)
+
+        return agg_select
 
     def _read_group_groupby(self, groupby_spec: str, query: Query) -> SQL:
         """ Return <SQL expression> corresponding to the given groupby element.
         The method also checks whether the fields used in the groupby are
         accessible for reading.
         """
-        fname, property_name, granularity = parse_read_group_spec(groupby_spec)
+        fname, property_name, granularity, _agg_domain = parse_read_group_spec(groupby_spec)
         if fname not in self:
             raise ValueError(f"Invalid field {fname!r} on model {self._name!r}")
 
@@ -2268,7 +2284,7 @@ class BaseModel(metaclass=MetaModel):
         """ Return the empty value corresponding to the given groupby spec or aggregate spec. """
         if spec == '__count':
             return 0
-        fname, __, func = parse_read_group_spec(spec)  # func is either None, granularity or an aggregate
+        fname, __, func, _agg_domain = parse_read_group_spec(spec)  # func is either None, granularity or an aggregate
         if func in ('count', 'count_distinct'):
             return 0
         if func == 'array_agg':
@@ -2315,7 +2331,7 @@ class BaseModel(metaclass=MetaModel):
         if aggregate_spec == '__count':
             return ((value if value is not None else empty_value) for value in raw_values)
 
-        fname, __, func = parse_read_group_spec(aggregate_spec)
+        fname, __, func, _agg_domain = parse_read_group_spec(aggregate_spec)
         if func == 'recordset':
             field = self._fields[fname]
             Model = self.pool[field.comodel_name] if field.relational else self.pool[self._name]
@@ -2789,7 +2805,10 @@ class BaseModel(metaclass=MetaModel):
 
         annotated_groupby = {}  # Key as the name in the result, value as the explicit groupby specification
         for group_spec in lazy_groupby:
-            field_name, property_name, granularity = parse_read_group_spec(group_spec)
+            # PATCH to allow filtered aggregates
+            field_name, property_name, granularity, agg_domain = parse_read_group_spec(group_spec)
+            if agg_domain:
+                raise ValueError(f"Groupby cannot use aggregate domain: {group_spec}")
             if field_name not in self._fields:
                 raise ValueError(f"Invalid field {field_name!r} on model {self._name!r}")
             field = self._fields[field_name]
@@ -2861,20 +2880,21 @@ class BaseModel(metaclass=MetaModel):
             match = regex_field_agg.match(field_spec)
             if not match:
                 raise ValueError(f"Invalid field specification {field_spec!r}.")
-            name, func, fname = match.groups()
-
+            name, func, fname, agg_domain = match.groups()
+            if not agg_domain:
+                agg_domain = "[]"
             if fname:  # Manage this kind of specification : "field_min:min(field)"
-                annotated_aggregates[name] = f"{fname}:{func}"
+                annotated_aggregates[name] = f"{fname}:{func}{agg_domain}"
                 continue
             if func:  # Manage this kind of specification : "field:min"
-                annotated_aggregates[name] = f"{name}:{func}"
+                annotated_aggregates[name] = f"{name}:{func}{agg_domain}"
                 continue
 
             if name not in self._fields:
                 raise ValueError(f"Invalid field {name!r} on model {self._name!r}")
             field = self._fields[name]
             if field.base_field.store and field.base_field.column_type and field.aggregator and field_spec not in annotated_groupby:
-                annotated_aggregates[name] = f"{name}:{field.aggregator}"
+                annotated_aggregates[name] = f"{name}:{field.aggregator}{agg_domain}"
 
         if orderby:
             new_terms = []
@@ -5696,6 +5716,9 @@ class BaseModel(metaclass=MetaModel):
         sql_field = self._field_to_sql(alias, field_name, query)
         if field.type == 'boolean':
             sql_field = SQL("COALESCE(%s, FALSE)", sql_field)
+        # PATCH to allow case-insensitive sorting
+        elif isinstance(field, fields._String):
+            sql_field = SQL("LOWER(%s)", sql_field)
         if query.groupby:
             query.groupby = SQL('%s, %s', query.groupby, sql_field)
 

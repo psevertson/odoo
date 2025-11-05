@@ -678,7 +678,7 @@ class Users(models.Model):
     @api.model
     def _read_group_select(self, aggregate_spec, query):
         try:
-            fname, __, __ = models.parse_read_group_spec(aggregate_spec)
+            fname, __, __, __ = models.parse_read_group_spec(aggregate_spec)
         except Exception:
             # may happen if aggregate_spec == '__count', for instance
             fname = None
@@ -688,7 +688,7 @@ class Users(models.Model):
 
     @api.model
     def _read_group_groupby(self, groupby_spec, query):
-        fname, __, __ = models.parse_read_group_spec(groupby_spec)
+        fname, __, __, __ = models.parse_read_group_spec(groupby_spec)
         if fname in USER_PRIVATE_FIELDS:
             raise AccessError(_("Cannot groupby on %s parameter", fname))
         return super()._read_group_groupby(groupby_spec, query)
