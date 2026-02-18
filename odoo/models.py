@@ -82,7 +82,7 @@ regex_alphanumeric = re.compile(r'^[a-z0-9_]+$')
 regex_order = re.compile(r'''
     ^
     (\s*
-        (?P<term>((?P<field>[a-z0-9_]+|"[a-z0-9_]+")(\.(?P<property>[a-z0-9_]+))?(:(?P<func>[a-z_]+))?))
+        (?P<term>((?P<field>[a-z0-9_]+|"[a-z0-9_]+")(\.(?P<property>[a-z0-9_]+))?(:(?P<func>[a-z_]+))?(?P<agg_domain>\[.*\])?))
         (\s+(?P<direction>desc|asc))?
         (\s+(?P<nulls>nulls\ first|nulls\ last))?
         \s*
@@ -103,6 +103,26 @@ GC_UNLINK_LIMIT = 100_000
 INSERT_BATCH_SIZE = 100
 UPDATE_BATCH_SIZE = 100
 SQL_DEFAULT = psycopg2.extensions.AsIs("DEFAULT")
+
+def split_order(order):
+    """Return a list of order terms."""
+    # Agg Domains can contain commas in the domains, so we need to ignore commas in between []
+    balance = 0
+    parts = []
+    part = ""
+    for c in order:
+        if c == "[":
+            balance += 1
+        elif c == "]":
+            balance -= 1
+        elif c == "," and balance == 0:
+            parts.append(part.strip())
+            part = ""
+            continue
+        part += c
+    if part:
+        parts.append(part.strip())
+    return parts
 
 def parse_read_group_spec(spec: str) -> tuple:
     """ Return a triplet corresponding to the given groupby/path/aggregate specification. """
@@ -2247,7 +2267,7 @@ class BaseModel(metaclass=MetaModel):
 
         orderby_terms = []
 
-        for order_part in order.split(','):
+        for order_part in split_order(order):
             order_match = regex_order.match(order_part)
             if not order_match:
                 raise ValueError(f"Invalid order {order!r} for _read_group()")
@@ -2898,7 +2918,7 @@ class BaseModel(metaclass=MetaModel):
 
         if orderby:
             new_terms = []
-            for order_term in orderby.split(','):
+            for order_term in split_order(orderby):
                 order_term = order_term.strip()
                 for key_name, annotated in itertools.chain(reversed(annotated_groupby.items()), annotated_aggregates.items()):
                     key_name = key_name.split(':')[0]
@@ -5630,7 +5650,7 @@ class BaseModel(metaclass=MetaModel):
         alias = alias or self._table
 
         terms = []
-        for order_part in order.split(','):
+        for order_part in split_order(order):
             order_match = regex_order.match(order_part)
             field_name = order_match['field']
 
@@ -5783,7 +5803,7 @@ class BaseModel(metaclass=MetaModel):
 
         # flush the order fields
         if order:
-            for order_part in order.split(','):
+            for order_part in split_order(order):
                 order_field = order_part.split()[0]
                 field = self._fields.get(order_field)
                 if field is not None:
