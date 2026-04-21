@@ -798,6 +798,12 @@ class IrMailServer(models.Model):
         - Email FROM to use to send the email (in some case, it might be impossible
           to use the given email address directly if no mail server is configured for)
         """
+
+        # Anva patch to avoid sending mail to production mail servers.
+        # On internal servers, we always default to the dummy in the conf file.
+        if tools.config.get('environment', 'production') != 'production':
+            return None, email_from
+        
         email_from_normalized = email_normalize(email_from)
         email_from_domain = email_domain_extract(email_from_normalized)
         notifications_email = self.env.context.get('domain_notifications_email') or email_normalize(self._get_default_from_address())
@@ -841,11 +847,12 @@ class IrMailServer(models.Model):
             return mail_server[0], notifications_email or email_from
 
         # 4. Return the first mail server even if it was configured for another domain
-        if mail_servers:
-            _logger.warning(
-                "No mail server matches the from_filter, using %s as fallback",
-                notifications_email or email_from)
-            return mail_servers[0], notifications_email or email_from
+        # Anva patch to avoid sending mail to incorrect mail servers, default to the conf file instead
+        # if mail_servers:
+        #     _logger.warning(
+        #         "No mail server matches the from_filter, using %s as fallback",
+        #         notifications_email or email_from)
+        #     return mail_servers[0], notifications_email or email_from
 
         # 5: SMTP config in odoo-bin arguments
         from_filter = self.env['ir.mail_server']._get_default_from_filter()
